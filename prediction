@@ -1,0 +1,124 @@
+# ===============================================
+# CUSTOMER CHURN PREDICTION
+# ===============================================
+
+# Step 1: Mount Google Drive
+from google.colab import drive
+drive.mount('/content/drive')
+
+# Step 2: Load Dataset
+import pandas as pd
+
+# Change the path to your CSV file in Google Drive
+data = pd.read_csv('/content/drive/MyDrive/Telco Customer Churn/WA_Fn-UseC_-Telco-Customer-Churn.csv')
+print("Dataset loaded successfully!\n")
+print(data.head())
+
+# Step 3: Explore & Preprocess Data
+print("\nDataset Info:")
+print(data.info())
+
+# Convert target column 'Churn' to numeric
+data['Churn'] = data['Churn'].map({'Yes':1, 'No':0})
+
+# Encode categorical variables
+categorical_cols = data.select_dtypes(include=['object']).columns.tolist()
+categorical_cols.remove('customerID')
+data = pd.get_dummies(data, columns=categorical_cols, drop_first=True)
+
+# Fill missing values
+data.fillna(0, inplace=True)
+
+# Step 4: Split Data into Train and Test
+from sklearn.model_selection import train_test_split
+
+X = data.drop(['Churn', 'customerID'], axis=1, errors='ignore')
+y = data['Churn']
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+print(f"\nTraining Samples: {len(X_train)}, Testing Samples: {len(X_test)}")
+
+# Step 5: Train Random Forest Model
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
+
+# Step 6: Evaluate Model
+y_pred = model.predict(X_test)
+accuracy = accuracy_score(y_test, y_pred)
+print(f"\nModel Accuracy: {accuracy:.4f}")
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred))
+
+# Confusion Matrix
+cm = confusion_matrix(y_test, y_pred)
+plt.figure(figsize=(6,4))
+sns.heatmap(cm, annot=True, fmt="d", cmap="Blues")
+plt.xlabel("Predicted")
+plt.ylabel("Actual")
+plt.title("Confusion Matrix")
+plt.show()
+
+# Step 7: Feature Importance Visualization
+importances = model.feature_importances_
+features = X.columns
+sorted_indices = importances.argsort()
+
+plt.figure(figsize=(10,8))
+plt.barh(features[sorted_indices], importances[sorted_indices], color='skyblue')
+plt.xlabel("Feature Importance")
+plt.title("Random Forest Feature Importance")
+plt.show()
+
+# Step 8: Install Gradio
+!pip install gradio --quiet
+
+import gradio as gr
+import numpy as np
+
+# Step 9: Simplified Gradio Interface (Top Features Only)
+def predict_churn_simple(tenure, monthly_charges, contract_OneYear, contract_TwoYear, internet_service_FiberOptic, tech_support_Yes):
+    input_data = np.array([tenure, monthly_charges, contract_OneYear, contract_TwoYear,
+                           internet_service_FiberOptic, tech_support_Yes]).reshape(1, -1)
+
+    # Pad missing features with zeros
+    total_features = X_train.shape[1]
+    padded_input = np.zeros((1, total_features))
+
+    feature_indices = [X_train.columns.get_loc(f) for f in
+                       ['tenure', 'MonthlyCharges', 'Contract_One year', 'Contract_Two year',
+                        'InternetService_Fiber optic', 'TechSupport_Yes']]
+
+    for idx, val in zip(feature_indices, input_data[0]):
+        padded_input[0, idx] = val
+
+    prediction = model.predict(padded_input)[0]
+    probability = model.predict_proba(padded_input)[0][1]
+
+    if prediction == 1:
+        return f"⚠️ Customer is likely to **churn** ({probability*100:.2f}% probability)"
+    else:
+        return f"✅ Customer is likely to **stay** ({(1-probability)*100:.2f}% probability)"
+
+# Gradio input components
+inputs = [
+    gr.Number(label="Tenure (months)"),
+    gr.Number(label="Monthly Charges"),
+    gr.Dropdown([0,1], label="Contract One Year (0=No, 1=Yes)"),
+    gr.Dropdown([0,1], label="Contract Two Year (0=No, 1=Yes)"),
+    gr.Dropdown([0,1], label="Internet Service Fiber Optic (0=No, 1=Yes)"),
+    gr.Dropdown([0,1], label="Tech Support (0=No, 1=Yes)"),
+]
+
+# Launch Gradio interface
+gr.Interface(
+    fn=predict_churn_simple,
+    inputs=inputs,
+    outputs=gr.Textbox(label="Prediction"),
+    title="Customer Churn Prediction (Simplified)",
+    description="Enter key customer details to predict if they are likely to churn."
+).launch()
