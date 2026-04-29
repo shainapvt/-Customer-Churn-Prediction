@@ -1,0 +1,343 @@
+# Step 1: Mount Google Drive
+import numpy as np
+from google.colab import drive
+drive.mount('/content/drive')
+
+# Step 2: Load Dataset
+import pandas as pd
+
+# Change the path to your CSV file in Google Drive
+data = pd.read_csv('/content/drive/MyDrive/Telco Customer Churn/WA_Fn-UseC_-Telco-Customer-Churn.csv')
+print("Dataset loaded successfully!\n")
+print(data.head())
+
+# Step 3: Explore & Preprocess Data
+print("\nDataset Info:")
+print(data.info())
+
+# Convert target column 'Churn' to numeric
+data['Churn'] = data['Churn'].map({'Yes':1, 'No':0})
+
+# Encode categorical variables
+categorical_cols = data.select_dtypes(include=['object']).columns.tolist()
+categorical_cols.remove('customerID')
+data = pd.get_dummies(data, columns=categorical_cols, drop_first=True)
+
+# Fill missing values
+data.fillna(0, inplace=True)
+
+# Step 4: Split Data into Train and Test
+from sklearn.model_selection import train_test_split
+
+X = data.drop(['Churn', 'customerID'], axis=1, errors='ignore')
+y = data['Churn']
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=48)
+print(f"\nTraining Samples: {len(X_train)}, Testing Samples: {len(X_test)}")
+
+# Step 5: Train Random Forest Model
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+model = RandomForestClassifier(n_estimators=98, random_state=48)
+model.fit(X_train, y_train)
+
+# Step 6: Evaluate Model
+y_pred = model.predict(X_test)
+accuracy = accuracy_score(y_test, y_pred)
+print(f"\nModel Accuracy: {accuracy:.4f}")
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred))
+y_probs = model.predict_proba(X_test)[:, 1]
+threshold_default = 0.5
+y_pred_default = (y_probs >= threshold_default).astype(int)
+
+from sklearn.metrics import recall_score, precision_score, f1_score
+
+recall_default = recall_score(y_test, y_pred_default)
+precision_default = precision_score(y_test, y_pred_default)
+f1_default = f1_score(y_test, y_pred_default)
+
+print("=== WITHOUT GOVERNANCE ===")
+print("Threshold:", threshold_default)
+print("Recall:", recall_default)
+print("Precision:", precision_default)
+print("F1 Score:", f1_default)
+def cost_function(y_true, y_pred):
+    cost = 0
+    for yt, yp in zip(y_true, y_pred):
+        if yt == 1 and yp == 0:
+            cost += 100  # missed churner (high loss)
+        elif yt == 0 and yp == 1:
+            cost += 10   # unnecessary action
+    return cost
+    import numpy as np
+
+thresholds = np.arange(0.1, 0.9, 0.05)
+costs = []
+
+for t in thresholds:
+    y_pred = (y_probs >= t).astype(int)
+    c = cost_function(y_test.values, y_pred)
+    costs.append(c)
+
+# Find best threshold
+best_idx = np.argmin(costs)
+best_threshold = thresholds[best_idx]
+
+print("\n=== WITH GOVERNANCE ===")
+print("Best Threshold:", best_threshold)
+y_pred_tuned = (y_probs >= best_threshold).astype(int)
+
+recall_tuned = recall_score(y_test, y_pred_tuned)
+precision_tuned = precision_score(y_test, y_pred_tuned)
+f1_tuned = f1_score(y_test, y_pred_tuned)
+
+print("Recall:", recall_tuned)
+print("Precision:", precision_tuned)
+print("F1 Score:", f1_tuned)
+cost_default = cost_function(y_test.values, y_pred_default)
+cost_tuned = cost_function(y_test.values, y_pred_tuned)
+
+print("\n=== BUSINESS COST COMPARISON ===")
+print("Without Governance Cost:", cost_default)
+print("With Governance Cost:", cost_tuned)
+import matplotlib.pyplot as plt
+
+plt.figure()
+plt.plot(thresholds, costs, marker='o')
+plt.axvline(best_threshold, linestyle='--', label=f'Best Threshold: {best_threshold:.2f}')
+plt.xlabel("Threshold")
+plt.ylabel("Business Cost")
+plt.title("Threshold vs Business Cost")
+plt.legend()
+plt.show()
+metrics = ["Recall", "Precision", "F1"]
+
+without = [recall_default, precision_default, f1_default]
+with_gov = [recall_tuned, precision_tuned, f1_tuned]
+
+x = range(len(metrics))
+
+plt.figure()
+plt.plot(x, without, marker='o', label="Without Governance")
+plt.plot(x, with_gov, marker='o', label="With Governance")
+plt.xticks(x, metrics)
+plt.xlabel("Metrics")
+plt.ylabel("Score")
+plt.title("Performance Comparison")
+plt.legend()
+plt.show()
+X_drifted = X_test.copy()
+import pandas as pd
+
+importance_df = pd.DataFrame({
+    "feature": X.columns,
+    "importance": model.feature_importances_
+}).sort_values(by="importance", ascending=False)
+
+print(importance_df.head(5))
+
+X_drifted = X_test.copy()
+
+# Apply stronger drift to top features
+X_drifted["tenure"] *= 0.3
+X_drifted["MonthlyCharges"] *= 1.8
+
+y_probs_drift = model.predict_proba(X_drifted)[:, 1]
+y_pred_drift = (y_probs_drift >= 0.5).astype(int)
+
+from sklearn.metrics import recall_score
+
+recall_drift = recall_score(y_test, y_pred_drift)
+
+print("Recall after drift:", recall_drift)
+
+
+X_drifted.iloc[:, 0] *= 1.8  # simulate drift
+
+y_probs_drift = model.predict_proba(X_drifted)[:, 1]
+y_pred_drift = (y_probs_drift >= threshold_default).astype(int)
+
+recall_drift = recall_score(y_test, y_pred_drift)
+
+print("\n=== DRIFT IMPACT ===")
+print("Recall before drift:", recall_default)
+print("Recall after drift:", recall_drift)
+print("\n=== SUMMARY ===")
+print(f"Without Governance → Recall: {recall_default:.2f}, Cost: {cost_default}")
+print(f"With Governance → Recall: {recall_tuned:.2f}, Cost: {cost_tuned}")
+print(f"Optimal Threshold: {best_threshold}")
+import matplotlib.pyplot as plt
+
+# Your results
+labels = ["Without Governance", "With Governance"]
+
+recall_values = [0.46, 0.96]
+cost_values = [21050, 7210]
+
+# Plot Recall Comparison
+plt.figure()
+plt.bar(labels, recall_values)
+plt.title("Churn Detection (Recall Comparison)")
+plt.ylabel("Recall")
+plt.xlabel("Scenario")
+plt.show()
+
+# Plot Cost Comparison
+plt.figure()
+plt.bar(labels, cost_values)
+plt.title("Business Cost Comparison")
+plt.ylabel("Cost")
+plt.xlabel("Scenario")
+plt.show()
+import matplotlib.pyplot as plt
+
+labels = ["Without Governance", "With Governance"]
+
+recall = [0.46, 0.96]
+cost = [21050, 7210]
+
+# Recall Chart
+plt.figure()
+plt.bar(labels, recall)
+plt.title("Customers Identified at Risk of Leaving")
+plt.ylabel("Proportion Identified")
+plt.show()
+
+# Cost Chart
+plt.figure()
+plt.bar(labels, cost)
+plt.title("Business Loss Due to Customer Churn")
+plt.ylabel("Cost")
+plt.show()
+from sklearn.metrics import accuracy_score
+
+acc_default = accuracy_score(y_test, y_pred_default)
+acc_tuned = accuracy_score(y_test, y_pred_tuned)
+
+print("Accuracy without governance:", acc_default)
+print("Accuracy with governance:", acc_tuned)
+# categorized as low risk,high and medium among customers
+y_probs = model.predict_proba(X_test)[:, 1]
+import pandas as pd
+
+risk_df = pd.DataFrame({
+    "Actual": y_test.values,
+    "Probability": y_probs
+})
+
+def assign_risk(prob):
+    if prob >= 0.7:
+        return "High Risk"
+    elif prob >= 0.3:
+        return "Medium Risk"
+    else:
+        return "Low Risk"
+
+risk_df["Risk_Level"] = risk_df["Probability"].apply(assign_risk)
+
+risk_df.head()
+risk_counts = risk_df["Risk_Level"].value_counts()
+print(risk_counts)
+import matplotlib.pyplot as plt
+
+plt.figure()
+risk_counts.plot(kind='bar')
+plt.title("Customer Risk Segmentation")
+plt.xlabel("Risk Level")
+plt.ylabel("Number of Customers")
+plt.show()
+churn_distribution = risk_df.groupby("Risk_Level")["Actual"].sum()
+print(churn_distribution)
+plt.figure()
+churn_distribution.plot(kind='bar')
+plt.title("Actual Churners per Risk Segment")
+plt.xlabel("Risk Level")
+plt.ylabel("Number of Churners")
+plt.show()
+summary = risk_df.groupby("Risk_Level").agg(
+    Total_Customers=("Actual", "count"),
+    Actual_Churners=("Actual", "sum")
+)
+
+summary["Churn_Rate"] = summary["Actual_Churners"] / summary["Total_Customers"]
+
+print(summary)
+import matplotlib.pyplot as plt
+
+plt.figure()
+plt.pie(summary["Actual_Churners"],
+        labels=summary.index,
+        autopct='%1.1f%%')
+plt.title("Where Churn is Coming From")
+plt.show()
+plt.figure()
+plt.bar(summary.index, summary["Churn_Rate"])
+plt.title("Churn Rate by Risk Segment")
+plt.xlabel("Risk Level")
+plt.ylabel("Churn Rate")
+plt.show()
+#compaire cost with 3 category with governance,without and with 3 groups
+def cost_function(y_true, y_pred):
+    cost = 0
+    for yt, yp in zip(y_true, y_pred):
+        if yt == 1 and yp == 0:
+            cost += 100  # missed churner
+        elif yt == 0 and yp == 1:
+            cost += 10   # unnecessary action
+    return cost
+    threshold_default = 0.5
+y_pred_default = (y_probs >= threshold_default).astype(int)
+
+cost_default = cost_function(y_test.values, y_pred_default)
+
+print("Cost WITHOUT Governance:", cost_default)
+import pandas as pd
+
+risk_df = pd.DataFrame({
+    "Actual": y_test.values,
+    "Probability": y_probs
+})
+
+def assign_risk(prob):
+    if prob >= 0.7:
+        return "High Risk"
+    elif prob >= 0.3:
+        return "Medium Risk"
+    else:
+        return "Low Risk"
+
+risk_df["Risk_Level"] = risk_df["Probability"].apply(assign_risk)
+def segmented_prediction(row):
+    if row["Risk_Level"] in ["High Risk", "Medium Risk"]:
+        return 1   # take action (predict churn)
+    else:
+        return 0   # no action
+
+def segmented_prediction(row):
+    if row["Risk_Level"] in ["High Risk", "Medium Risk"]:
+        return 1   # take action (predict churn)
+    else:
+        return 0   # no action
+
+risk_df["Predicted"] = risk_df.apply(segmented_prediction, axis=1)
+cost_segmented = cost_function(risk_df["Actual"], risk_df["Predicted"])
+
+print("Cost WITH Governance + Segmentation:", cost_segmented)
+print("\n=== COST COMPARISON ===")
+print(f"Without Governance: {cost_default}")
+print(f"With Governance: {cost_tuned}")
+print(f"With Segmentation: {cost_segmented}")
+import matplotlib.pyplot as plt
+
+labels = ["Without Gov", "With Gov", "With Segmentation"]
+costs = [cost_default, cost_tuned, cost_segmented]
+
+plt.figure()
+plt.bar(labels, costs)
+plt.title("Business Cost Comparison")
+plt.ylabel("Cost")
+plt.show()
